@@ -2,16 +2,16 @@
 import React, { useState, useEffect } from "react";
 import { parse, stringify } from "yaml";
 
-/** -------------------------------------------------------------
+/** ========================================================================
  *  CHANNEL OPTIONS (for multi-select)
- *  -------------------------------------------------------------
- **/
+ * ========================================================================
+ */
 const EXPOSE_OPTIONS = ["internet", "openApi", "extranet"];
 
-/** -------------------------------------------------------------
- *  TYPES
- *  -------------------------------------------------------------
- **/
+/** ========================================================================
+ *  TYPES & INTERFACES
+ * ========================================================================
+ */
 interface ParameterObject {
   name: string;
   in: "path" | "query" | "header" | "cookie";
@@ -28,7 +28,7 @@ interface SchemaObject {
   allOf?: SchemaObject[];
   oneOf?: SchemaObject[];
   /** Our custom extension for exposure (comma-separated channels) */
-  'x-expose-to'?: string;
+  "x-expose-to"?: string;
 }
 
 interface OpenAPIDocument {
@@ -55,7 +55,7 @@ interface OperationObject {
   operationId?: string;
   tags?: string[];
   /** Our custom extension for exposure (comma-separated channels) */
-  'x-expose-to'?: string;
+  "x-expose-to"?: string;
   parameters?: ParameterObject[];
   requestBody?: {
     content: {
@@ -82,7 +82,9 @@ interface ResponseObject {
   };
 }
 
-/** Default skeleton for a fresh OpenAPI Document */
+/**
+ * Default skeleton for a fresh OpenAPI Document
+ */
 const DEFAULT_OPENAPI: OpenAPIDocument = {
   openapi: "3.0.0",
   info: {
@@ -96,20 +98,31 @@ const DEFAULT_OPENAPI: OpenAPIDocument = {
   },
 };
 
-/** For example usage in the MethodsList select. */
+/** Methods for new operations */
 const METHOD_OPTIONS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"];
 
-/** -------------------------------------------------------------
- *  MAIN EDITOR COMPONENT
- *  -------------------------------------------------------------
- **/
 const OpenAPIEditorGeneric: React.FC = () => {
+  /**
+   * The 'real' OpenAPI document. We only commit changes to this
+   * once the user explicitly confirms them.
+   */
   const [apiDoc, setApiDoc] = useState<OpenAPIDocument>(DEFAULT_OPENAPI);
+
+  /**
+   * The 'editorState' is a local working copy or portion of the doc
+   * that the user edits inline. After confirmation, we merge it into apiDoc.
+   */
+  const [editorState, setEditorState] = useState<OpenAPIDocument>(apiDoc);
+
   const [yamlOutput, setYamlOutput] = useState("");
   const [messages, setMessages] = useState<MessageItem[]>([]);
 
-  const [confirmModalData, setConfirmModalData] = useState<ConfirmModalData | null>(null);
+  // On mount or whenever we change `apiDoc`, reset the editorState
+  useEffect(() => {
+    setEditorState(apiDoc);
+  }, [apiDoc]);
 
+  // Keep YAML output in sync with the 'real' doc
   useEffect(() => {
     try {
       setYamlOutput(stringify(apiDoc));
@@ -118,66 +131,75 @@ const OpenAPIEditorGeneric: React.FC = () => {
     }
   }, [apiDoc]);
 
-  /** HELPER: Show ephemeral messages in the messages bar */
   function showMessage(text: string, type: "info" | "error") {
-    const id = new Date().getTime() + Math.random();
+    const id = Date.now() + Math.random();
     setMessages((prev) => [...prev, { id, text, type }]);
   }
 
-  /** HELPER: Hide a single message */
   function dismissMessage(id: number) {
     setMessages((prev) => prev.filter((m) => m.id !== id));
   }
 
-  /** Confirm Modal open/close */
-  function openConfirmDialog(opts: ConfirmModalData) {
-    setConfirmModalData(opts);
-  }
-  function closeConfirmDialog() {
-    setConfirmModalData(null);
-  }
-
-  /** Load file & parse */
+  /**
+   * Handle file loading
+   */
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
+
     reader.onload = (ev) => {
       try {
         const content = ev.target?.result as string;
-        const parsed = parse(content);
-        setApiDoc(parsed);
+        const parsedDoc = parse(content);
+        setApiDoc(parsedDoc);
         showMessage("YAML file loaded successfully.", "info");
       } catch (err) {
         showMessage("Invalid YAML file. Please check the file content.", "error");
-        console.error("Error parsing YAML:", err);
       }
     };
     reader.readAsText(file);
   };
 
-  /** Download the current YAML */
+  /**
+   * Download the current real doc as YAML
+   */
   const handleDownload = () => {
     const blob = new Blob([yamlOutput], { type: "text/yaml" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "api.yaml";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "api.yaml";
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
     URL.revokeObjectURL(url);
   };
 
-  return (
-    <div style={{ maxWidth: 900, margin: "auto", fontFamily: "sans-serif", padding: 20 }}>
-      <h2>OpenAPI Generic Editor - Multi-Select for Expose Channels</h2>
+  /**
+   * Called when user wants to commit the editorState to apiDoc.
+   */
+  const handleSaveAllChanges = () => {
+    setApiDoc(editorState);
+    showMessage("All changes saved to the main document.", "info");
+  };
 
-      {/* MESSAGES BAR */}
+  /**
+   * Called when user wants to discard edits and revert.
+   */
+  const handleDiscardChanges = () => {
+    setEditorState(apiDoc);
+    showMessage("All unsaved changes have been discarded.", "info");
+  };
+
+  return (
+    <div style={styles.mainContainer}>
+      <h2>OpenAPI Editor (Addressing Points 3,4,6)</h2>
+
       <MessagesBar messages={messages} onDismiss={dismissMessage} />
 
-      {/* File + Start Fresh */}
-      <div style={{ marginBottom: 20 }}>
+      {/* File Import / Export */}
+      <div style={styles.fileActionsContainer}>
         <label htmlFor="fileInput" style={{ marginRight: 10 }}>
           Load YAML:
         </label>
@@ -199,65 +221,66 @@ const OpenAPIEditorGeneric: React.FC = () => {
         </button>
       </div>
 
-      {/* Info Editor */}
-      <InfoEditor apiDoc={apiDoc} setApiDoc={setApiDoc} />
+      <InfoEditor editorState={editorState} setEditorState={setEditorState} />
 
-      {/* Paths */}
-      <PathsList
-        apiDoc={apiDoc}
-        setApiDoc={setApiDoc}
-        showMessage={showMessage}
-        openConfirm={openConfirmDialog}
-      />
+      <PathsEditor editorState={editorState} setEditorState={setEditorState} showMessage={showMessage} />
+      <SchemasEditor editorState={editorState} setEditorState={setEditorState} showMessage={showMessage} />
 
-      {/* Schemas */}
-      <SchemasList
-        apiDoc={apiDoc}
-        setApiDoc={setApiDoc}
-        showMessage={showMessage}
-        openConfirm={openConfirmDialog}
-      />
+      {/* Editor-Wide Save / Discard */}
+      <div style={{ margin: "20px 0" }}>
+        <button onClick={handleSaveAllChanges} style={{ marginRight: 10 }}>
+          Save All Changes
+        </button>
+        <button onClick={handleDiscardChanges}>Discard Changes</button>
+      </div>
 
       {/* YAML Output */}
-      <fieldset style={{ border: "1px solid #aaa", padding: 10, marginBottom: 20 }}>
+      <fieldset style={styles.yamlContainer}>
         <legend>
-          <strong>YAML Output</strong>
+          <strong>YAML Output (current committed doc)</strong>
         </legend>
-        <textarea
-          readOnly
-          value={yamlOutput}
-          style={{ width: "100%", height: 150, fontFamily: "monospace" }}
-          aria-label="Generated YAML Output"
-        />
+        <textarea readOnly value={yamlOutput} style={styles.yamlOutput} aria-label="Generated YAML" />
       </fieldset>
-
       <button onClick={handleDownload}>Download YAML</button>
-
-      {/* GLOBAL CONFIRMATION MODAL */}
-      {confirmModalData && (
-        <ConfirmationModal
-          title={confirmModalData.title}
-          message={confirmModalData.message}
-          onConfirm={() => {
-            confirmModalData.onConfirm();
-            closeConfirmDialog();
-          }}
-          onCancel={() => {
-            confirmModalData.onCancel?.();
-            closeConfirmDialog();
-          }}
-        />
-      )}
     </div>
   );
 };
 
 export default OpenAPIEditorGeneric;
 
-/** -------------------------------------------------------------
- *  MESSAGES BAR (Notifications for user)
- *  -------------------------------------------------------------
- **/
+/** ========================================================================
+ *  STYLES
+ * ========================================================================
+ */
+const styles: Record<string, React.CSSProperties> = {
+  mainContainer: {
+    maxWidth: 1000,
+    margin: "auto",
+    fontFamily: "sans-serif",
+    padding: 20,
+  },
+  fileActionsContainer: {
+    marginBottom: 20,
+  },
+  yamlContainer: {
+    border: "1px solid #aaa",
+    padding: 10,
+    marginBottom: 20,
+  },
+  yamlOutput: {
+    width: "100%",
+    height: 150,
+    fontFamily: "monospace",
+  },
+  messageContainer: {
+    marginBottom: 16,
+  },
+};
+
+/** ========================================================================
+ *  MESSAGES BAR
+ * ========================================================================
+ */
 interface MessageItem {
   id: number;
   text: string;
@@ -272,7 +295,7 @@ const MessagesBar: React.FC<MessagesBarProps> = ({ messages, onDismiss }) => {
   if (!messages.length) return null;
 
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div style={styles.messageContainer}>
       {messages.map((msg) => {
         const bgColor = msg.type === "error" ? "#ffe5e5" : "#e5ffe5";
         const borderColor = msg.type === "error" ? "#ff8888" : "#88ff88";
@@ -308,159 +331,96 @@ const MessagesBar: React.FC<MessagesBarProps> = ({ messages, onDismiss }) => {
   );
 };
 
-/** -------------------------------------------------------------
- *  CONFIRMATION MODAL
- *  -------------------------------------------------------------
- **/
-interface ConfirmModalData {
-  title: string;
-  message: string;
-  onConfirm: () => void;
-  onCancel?: () => void;
-}
-
-interface ConfirmationModalProps {
-  title: string;
-  message: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-}
-
-const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
-  title,
-  message,
-  onConfirm,
-  onCancel,
-}) => {
-  return (
-    <div style={overlayStyle}>
-      <div style={modalStyle} aria-modal="true" role="dialog" aria-labelledby="confirmTitle">
-        <div style={{ marginBottom: 10 }}>
-          <h3 id="confirmTitle" style={{ margin: 0 }}>
-            {title}
-          </h3>
-        </div>
-        <div style={{ marginBottom: 20 }}>{message}</div>
-        <div>
-          <button
-            onClick={onConfirm}
-            style={{ marginRight: 8, padding: "5px 12px", cursor: "pointer" }}
-          >
-            Confirm
-          </button>
-          <button onClick={onCancel} style={{ padding: "5px 12px", cursor: "pointer" }}>
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const overlayStyle: React.CSSProperties = {
-  position: "fixed",
-  top: 0,
-  left: 0,
-  width: "100vw",
-  height: "100vh",
-  backgroundColor: "rgba(0,0,0,0.3)",
-  display: "flex",
-  justifyContent: "center",
-  alignItems: "center",
-  zIndex: 9999,
-};
-
-const modalStyle: React.CSSProperties = {
-  backgroundColor: "#fff",
-  padding: 20,
-  borderRadius: 6,
-  maxWidth: 600,
-  width: "80%",
-  boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
-};
-
-/** -------------------------------------------------------------
- *  INFO EDITOR 
- *  -------------------------------------------------------------
- **/
+/** ========================================================================
+ *  INFO EDITOR (inline editing, no separate modals)
+ * ========================================================================
+ */
 interface InfoEditorProps {
-  apiDoc: OpenAPIDocument;
-  setApiDoc: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
+  editorState: OpenAPIDocument;
+  setEditorState: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
 }
 
-const InfoEditor: React.FC<InfoEditorProps> = ({ apiDoc, setApiDoc }) => {
-  const infoFields: GenericFieldConfig[] = [
-    { key: "title", label: "Title", type: "text" },
-    { key: "version", label: "Version", type: "text" },
-    { key: "description", label: "Description", type: "textarea" },
-  ];
+const InfoEditor: React.FC<InfoEditorProps> = ({ editorState, setEditorState }) => {
+  const { info } = editorState;
 
-  const handleInfoSave = (newInfo: any) => {
-    setApiDoc({
-      ...apiDoc,
-      info: { ...apiDoc.info, ...newInfo },
-    });
-  };
+  function handleChange(key: keyof typeof info, value: string) {
+    const newInfo = { ...info, [key]: value };
+    setEditorState((prev) => ({ ...prev, info: newInfo }));
+  }
 
   return (
     <fieldset style={{ border: "1px solid #aaa", padding: 10, marginBottom: 20 }}>
       <legend>
         <strong>API Information</strong>
       </legend>
-      <GenericSectionEditor title="Edit Info" data={apiDoc.info} fields={infoFields} onSave={handleInfoSave} />
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ display: "block" }}>Title:</label>
+        <input
+          type="text"
+          value={info.title}
+          onChange={(e) => handleChange("title", e.target.value)}
+          style={{ width: "100%" }}
+        />
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ display: "block" }}>Version:</label>
+        <input
+          type="text"
+          value={info.version}
+          onChange={(e) => handleChange("version", e.target.value)}
+          style={{ width: "100%" }}
+        />
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ display: "block" }}>Description:</label>
+        <textarea
+          value={info.description || ""}
+          onChange={(e) => handleChange("description", e.target.value)}
+          rows={3}
+          style={{ width: "100%" }}
+        />
+      </div>
     </fieldset>
   );
 };
 
-/** -------------------------------------------------------------
- *  PATHS LIST + PATH ROW
- *  -------------------------------------------------------------
- **/
-interface PathsListProps {
-  apiDoc: OpenAPIDocument;
-  setApiDoc: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
+/** ========================================================================
+ *  PATHS EDITOR (inline forms, no modals)
+ * ========================================================================
+ */
+interface PathsEditorProps {
+  editorState: OpenAPIDocument;
+  setEditorState: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
   showMessage: (msg: string, type: "info" | "error") => void;
-  openConfirm: (data: ConfirmModalData) => void;
 }
 
-const PathsList: React.FC<PathsListProps> = ({ apiDoc, setApiDoc, showMessage, openConfirm }) => {
-  const [showCreatePath, setShowCreatePath] = useState(false);
+const PathsEditor: React.FC<PathsEditorProps> = ({ editorState, setEditorState, showMessage }) => {
   const [newPathName, setNewPathName] = useState("");
 
+  const pathsEntries = Object.entries(editorState.paths);
+
   const handleAddPath = () => {
-    const pathNameTrimmed = newPathName.trim();
-    if (!pathNameTrimmed) {
+    const trimmed = newPathName.trim();
+    if (!trimmed) {
       showMessage("Path name cannot be empty.", "error");
       return;
     }
-    if (apiDoc.paths[pathNameTrimmed]) {
-      showMessage(`Path "${pathNameTrimmed}" already exists!`, "error");
+    if (editorState.paths[trimmed]) {
+      showMessage(`Path "${trimmed}" already exists!`, "error");
       return;
     }
-    setApiDoc({
-      ...apiDoc,
-      paths: {
-        ...apiDoc.paths,
-        [pathNameTrimmed]: {},
-      },
-    });
-    showMessage(`Path "${pathNameTrimmed}" created.`, "info");
+    const updatedPaths = { ...editorState.paths, [trimmed]: {} };
+    setEditorState({ ...editorState, paths: updatedPaths });
     setNewPathName("");
-    setShowCreatePath(false);
+    showMessage(`Path "${trimmed}" created`, "info");
   };
 
-  const handleDeletePath = (pathName: string) => {
-    openConfirm({
-      title: "Delete Path?",
-      message: `Are you sure you want to delete path "${pathName}"?`,
-      onConfirm: () => {
-        const updatedPaths = { ...apiDoc.paths };
-        delete updatedPaths[pathName];
-        setApiDoc({ ...apiDoc, paths: updatedPaths });
-        showMessage(`Path "${pathName}" deleted.`, "info");
-      },
-    });
-  };
+  function handleDeletePath(pathName: string) {
+    const updated = { ...editorState.paths };
+    delete updated[pathName];
+    setEditorState((prev) => ({ ...prev, paths: updated }));
+    showMessage(`Path "${pathName}" deleted`, "info");
+  }
 
   return (
     <fieldset style={{ border: "1px solid #aaa", padding: 10, marginBottom: 20 }}>
@@ -468,192 +428,164 @@ const PathsList: React.FC<PathsListProps> = ({ apiDoc, setApiDoc, showMessage, o
         <strong>Paths</strong>
       </legend>
 
-      {Object.keys(apiDoc.paths).length === 0 && <p>No paths defined.</p>}
-
-      {Object.entries(apiDoc.paths).map(([pathName, pathItem]) => (
-        <PathItemRow
-          key={pathName}
-          pathName={pathName}
-          pathItem={pathItem}
-          apiDoc={apiDoc}
-          setApiDoc={setApiDoc}
-          onDeletePath={() => handleDeletePath(pathName)}
+      {/* List existing paths */}
+      {pathsEntries.map(([path, item]) => (
+        <PathRow
+          key={path}
+          pathName={path}
+          pathItem={item}
+          editorState={editorState}
+          setEditorState={setEditorState}
+          onDeletePath={() => handleDeletePath(path)}
         />
       ))}
 
-      {showCreatePath ? (
-        <div style={{ marginTop: 8 }}>
-          <label htmlFor="newPathInput" style={{ marginRight: 5 }}>
-            New Path:
-          </label>
-          <input
-            id="newPathInput"
-            type="text"
-            placeholder="/new-path"
-            value={newPathName}
-            onChange={(e) => setNewPathName(e.target.value)}
-            aria-label="New path name"
-          />
-          <button onClick={handleAddPath} style={{ marginLeft: 5 }}>
-            Save
-          </button>
-          <button onClick={() => setShowCreatePath(false)} style={{ marginLeft: 5 }}>
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <button onClick={() => setShowCreatePath(true)} style={{ marginTop: 8 }}>
-          + Add Path
-        </button>
-      )}
+      {/* Inline form for new path */}
+      <div style={{ marginTop: 8 }}>
+        <input
+          type="text"
+          placeholder="/new-path"
+          value={newPathName}
+          onChange={(e) => setNewPathName(e.target.value)}
+          style={{ marginRight: 5 }}
+        />
+        <button onClick={handleAddPath}>Add Path</button>
+      </div>
     </fieldset>
   );
 };
 
-interface PathItemRowProps {
+interface PathRowProps {
   pathName: string;
   pathItem: PathItem;
-  apiDoc: OpenAPIDocument;
-  setApiDoc: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
+  editorState: OpenAPIDocument;
+  setEditorState: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
   onDeletePath: () => void;
 }
 
-const PathItemRow: React.FC<PathItemRowProps> = ({ pathName, pathItem, apiDoc, setApiDoc, onDeletePath }) => {
-  const [editPathModal, setEditPathModal] = useState(false);
-  const [tempPathName, setTempPathName] = useState(pathName);
+const PathRow: React.FC<PathRowProps> = ({
+  pathName,
+  pathItem,
+  editorState,
+  setEditorState,
+  onDeletePath,
+}) => {
+  const [editPathName, setEditPathName] = useState(pathName);
 
   const handleRenamePath = () => {
-    const trimmed = tempPathName.trim();
-    if (!trimmed) return;
-    if (trimmed === pathName) {
-      setEditPathModal(false);
+    const trimmed = editPathName.trim();
+    if (!trimmed || trimmed === pathName) return; // no rename
+
+    if (editorState.paths[trimmed]) {
+      alert(`Path "${trimmed}" already exists!`);
       return;
     }
-    if (apiDoc.paths[trimmed]) {
-      alert("Path name already exists!");
-      return;
-    }
-    const updated = { ...apiDoc.paths };
-    updated[trimmed] = updated[pathName];
-    delete updated[pathName];
-    setApiDoc({ ...apiDoc, paths: updated });
-    setEditPathModal(false);
+    // rename
+    const newPaths = { ...editorState.paths };
+    newPaths[trimmed] = newPaths[pathName];
+    delete newPaths[pathName];
+    setEditorState({ ...editorState, paths: newPaths });
   };
 
   return (
     <div style={{ padding: 5, borderBottom: "1px solid #ddd" }}>
-      <strong>{pathName}</strong>{" "}
-      <button style={{ marginLeft: 10 }} onClick={() => setEditPathModal(true)}>
-        Edit
-      </button>
-      <button style={{ marginLeft: 5 }} onClick={onDeletePath}>
-        Delete
-      </button>
+      <div style={{ marginBottom: 5 }}>
+        <input
+          style={{ minWidth: 150, marginRight: 5 }}
+          value={editPathName}
+          onChange={(e) => setEditPathName(e.target.value)}
+        />
+        <button onClick={handleRenamePath} style={{ marginRight: 5 }}>
+          Rename
+        </button>
+        <button onClick={onDeletePath}>Delete</button>
+      </div>
 
-      <MethodsList pathName={pathName} pathItem={pathItem} apiDoc={apiDoc} setApiDoc={setApiDoc} />
-
-      {editPathModal && (
-        <Modal title="Edit Path" onClose={() => setEditPathModal(false)}>
-          <div style={{ marginBottom: 8 }}>
-            <label htmlFor="pathRenameInput">Path Name: </label>
-            <input
-              id="pathRenameInput"
-              type="text"
-              value={tempPathName}
-              onChange={(e) => setTempPathName(e.target.value)}
-            />
-          </div>
-          <div>
-            <button onClick={handleRenamePath} style={{ marginRight: 5 }}>
-              Save
-            </button>
-            <button onClick={() => setEditPathModal(false)}>Cancel</button>
-          </div>
-        </Modal>
-      )}
+      <MethodsEditor
+        pathName={pathName}
+        pathItem={pathItem}
+        editorState={editorState}
+        setEditorState={setEditorState}
+      />
     </div>
   );
 };
 
-/** -------------------------------------------------------------
- *  METHODS LIST + METHOD ROW
- *  -------------------------------------------------------------
- **/
-interface MethodsListProps {
+/** ========================================================================
+ *  METHODS EDITOR (inline, no modals)
+ * ========================================================================
+ */
+interface MethodsEditorProps {
   pathName: string;
   pathItem: PathItem;
-  apiDoc: OpenAPIDocument;
-  setApiDoc: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
+  editorState: OpenAPIDocument;
+  setEditorState: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
 }
 
-const MethodsList: React.FC<MethodsListProps> = ({ pathName, pathItem, apiDoc, setApiDoc }) => {
-  const [showAddMethod, setShowAddMethod] = useState(false);
-  const [selectedMethod, setSelectedMethod] = useState("GET");
+const MethodsEditor: React.FC<MethodsEditorProps> = ({ pathName, pathItem, editorState, setEditorState }) => {
+  const [newMethod, setNewMethod] = useState("GET");
+
+  const methodsEntries = Object.entries(pathItem);
 
   const handleAddMethod = () => {
-    const methodLower = selectedMethod.toLowerCase();
-    if (pathItem[methodLower]) {
-      alert("Method already exists on this path!");
+    const lower = newMethod.toLowerCase();
+    if (pathItem[lower]) {
+      alert(`Method "${newMethod}" already exists!`);
       return;
     }
-    setApiDoc({
-      ...apiDoc,
+    const newOperation: OperationObject = {
+      summary: `New ${newMethod} endpoint`,
+      responses: { "200": { description: "OK" } },
+      "x-expose-to": "",
+    };
+    const updatedPathItem = { ...pathItem, [lower]: newOperation };
+    setEditorState((prev) => ({
+      ...prev,
       paths: {
-        ...apiDoc.paths,
-        [pathName]: {
-          ...apiDoc.paths[pathName],
-          [methodLower]: {
-            summary: `New ${selectedMethod} endpoint`,
-            responses: { "200": { description: "OK" } },
-            'x-expose-to': "", // default
-          },
-        },
+        ...prev.paths,
+        [pathName]: updatedPathItem,
       },
-    });
-    setShowAddMethod(false);
+    }));
   };
 
-  const handleDeleteMethod = (method: string) => {
-    const updated = { ...apiDoc.paths };
-    delete updated[pathName][method];
-    setApiDoc({ ...apiDoc, paths: updated });
+  const handleDeleteMethod = (m: string) => {
+    const updatedPath = { ...pathItem };
+    delete updatedPath[m];
+    setEditorState((prev) => ({
+      ...prev,
+      paths: {
+        ...prev.paths,
+        [pathName]: updatedPath,
+      },
+    }));
   };
 
   return (
-    <div style={{ marginLeft: 20, marginTop: 5 }}>
-      {Object.entries(pathItem).map(([method, operation]) => (
+    <div style={{ marginLeft: 20 }}>
+      {methodsEntries.map(([method, operation]) => (
         <MethodRow
           key={method}
           pathName={pathName}
           method={method}
           operation={operation}
-          apiDoc={apiDoc}
-          setApiDoc={setApiDoc}
-          onDeleteMethod={() => handleDeleteMethod(method)}
+          editorState={editorState}
+          setEditorState={setEditorState}
+          onDelete={() => handleDeleteMethod(method)}
         />
       ))}
 
-      {showAddMethod ? (
-        <div style={{ marginTop: 5 }}>
-          <select value={selectedMethod} onChange={(e) => setSelectedMethod(e.target.value)}>
-            {METHOD_OPTIONS.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-          <button onClick={handleAddMethod} style={{ marginLeft: 5 }}>
-            Add
-          </button>
-          <button onClick={() => setShowAddMethod(false)} style={{ marginLeft: 5 }}>
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <button onClick={() => setShowAddMethod(true)} style={{ marginTop: 5 }}>
-          + Add Method
+      <div style={{ marginTop: 5 }}>
+        <select value={newMethod} onChange={(e) => setNewMethod(e.target.value)}>
+          {METHOD_OPTIONS.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <button onClick={handleAddMethod} style={{ marginLeft: 5 }}>
+          Add Method
         </button>
-      )}
+      </div>
     </div>
   );
 };
@@ -662,382 +594,297 @@ interface MethodRowProps {
   pathName: string;
   method: string;
   operation: OperationObject;
-  apiDoc: OpenAPIDocument;
-  setApiDoc: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
-  onDeleteMethod: () => void;
+  editorState: OpenAPIDocument;
+  setEditorState: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
+  onDelete: () => void;
 }
 
 const MethodRow: React.FC<MethodRowProps> = ({
   pathName,
   method,
   operation,
-  apiDoc,
-  setApiDoc,
-  onDeleteMethod,
+  editorState,
+  setEditorState,
+  onDelete,
 }) => {
-  const [editMethodModal, setEditMethodModal] = useState(false);
-  const [editTagsModal, setEditTagsModal] = useState(false);
-  const [editReqRespModal, setEditReqRespModal] = useState(false);
-  const [exposeModal, setExposeModal] = useState(false);
-
-  const methodFields: GenericFieldConfig[] = [
-    { key: "summary", label: "Summary", type: "text" },
-    { key: "description", label: "Description", type: "textarea" },
-    { key: "operationId", label: "Operation ID", type: "text" },
-  ];
-
-  const handleMethodSave = (updated: any) => {
-    const updatedPaths = { ...apiDoc.paths };
-    updatedPaths[pathName][method] = {
-      ...operation,
-      ...updated,
-    };
-    setApiDoc({ ...apiDoc, paths: updatedPaths });
-  };
-
-  // Update tags
+  const [summary, setSummary] = useState(operation.summary || "");
+  const [desc, setDesc] = useState(operation.description || "");
+  const [expose, setExpose] = useState<string[]>(
+    operation["x-expose-to"] ? operation["x-expose-to"].split(",").map((s) => s.trim()) : []
+  );
   const tags = operation.tags || [];
-  const handleAddTag = (newTag: string) => {
-    if (!newTag.trim()) return;
-    const updatedPaths = { ...apiDoc.paths };
-    updatedPaths[pathName][method].tags = [...tags, newTag.trim()];
-    setApiDoc({ ...apiDoc, paths: updatedPaths });
-  };
 
-  const handleDeleteTag = (tagToDelete: string) => {
-    const updatedPaths = { ...apiDoc.paths };
-    updatedPaths[pathName][method].tags = tags.filter((t) => t !== tagToDelete);
-    setApiDoc({ ...apiDoc, paths: updatedPaths });
-  };
+  function commitOperation(changes: Partial<OperationObject>) {
+    const updatedMethod = { ...operation, ...changes };
+    const updatedPath = { ...editorState.paths[pathName], [method]: updatedMethod };
+    setEditorState((prev) => ({
+      ...prev,
+      paths: { ...prev.paths, [pathName]: updatedPath },
+    }));
+  }
 
-  return (
-    <div style={{ marginBottom: 5 }}>
-      <em>{method.toUpperCase()}:</em> {operation.summary || "(no summary)"}
-      <button style={{ marginLeft: 5 }} onClick={() => setEditMethodModal(true)}>
-        Edit
-      </button>
-      <button style={{ marginLeft: 5 }} onClick={() => setEditTagsModal(true)}>
-        Tags
-      </button>
-      <button style={{ marginLeft: 5 }} onClick={() => setEditReqRespModal(true)}>
-        Req/Resp
-      </button>
-      <button style={{ marginLeft: 5 }} onClick={() => setExposeModal(true)}>
-        Expose
-      </button>
-      <button style={{ marginLeft: 5 }} onClick={onDeleteMethod}>
-        Delete
-      </button>
-
-      {/* Edit Method Basic Info */}
-      {editMethodModal && (
-        <Modal title={`Edit Method: ${method.toUpperCase()}`} onClose={() => setEditMethodModal(false)}>
-          <GenericSectionEditor
-            title=""
-            data={operation}
-            fields={methodFields}
-            onSave={(vals) => {
-              handleMethodSave(vals);
-              setEditMethodModal(false);
-            }}
-          />
-        </Modal>
-      )}
-
-      {/* Edit Tags */}
-      {editTagsModal && (
-        <Modal title={`Tags for ${method.toUpperCase()}`} onClose={() => setEditTagsModal(false)}>
-          <TagsEditor tags={tags} onAddTag={handleAddTag} onDeleteTag={handleDeleteTag} />
-        </Modal>
-      )}
-
-      {/* Edit Request/Response */}
-      {editReqRespModal && (
-        <Modal
-          title={`Request & Response - ${method.toUpperCase()}`}
-          onClose={() => setEditReqRespModal(false)}
-        >
-          <RequestResponseEditor operation={operation} apiDoc={apiDoc} setApiDoc={setApiDoc} pathName={pathName} method={method} />
-        </Modal>
-      )}
-
-      {/* Edit Expose Channels */}
-      {exposeModal && (
-        <Modal title={`Set Expose for ${method.toUpperCase()}`} onClose={() => setExposeModal(false)}>
-          <MultiSelectExpose
-            currentValue={operation['x-expose-to'] || ""}
-            onSave={(val) => {
-              handleMethodSave({ 'x-expose-to': val });
-              setExposeModal(false);
-            }}
-          />
-        </Modal>
-      )}
-    </div>
+    // -------------------------------------------------------------------
+  // REINTRODUCE REQUEST/RESPONSE EDITING (Inline)
+  // -------------------------------------------------------------------
+  // Track local references for request & 200-response:
+  const [reqRef, setReqRef] = useState(
+    operation.requestBody?.content?.["application/json"]?.schema?.$ref || ""
   );
-};
-
-/** -------------------------------------------------------------
- *  TAGS EDITOR
- *  -------------------------------------------------------------
- **/
-interface TagsEditorProps {
-  tags: string[];
-  onAddTag: (tag: string) => void;
-  onDeleteTag: (tag: string) => void;
-}
-
-const TagsEditor: React.FC<TagsEditorProps> = ({ tags, onAddTag, onDeleteTag }) => {
-  const [newTag, setNewTag] = useState("");
-
-  return (
-    <div style={{ minWidth: 300 }}>
-      <ul>
-        {tags.map((tag) => (
-          <li key={tag}>
-            {tag}{" "}
-            <button onClick={() => onDeleteTag(tag)} style={{ marginLeft: 8 }}>
-              Remove
-            </button>
-          </li>
-        ))}
-      </ul>
-      <div style={{ marginTop: 8 }}>
-        <label htmlFor="addTagInput">Add Tag:</label>
-        <input
-          id="addTagInput"
-          type="text"
-          value={newTag}
-          onChange={(e) => setNewTag(e.target.value)}
-          placeholder="New Tag"
-          style={{ marginLeft: 5 }}
-        />
-        <button
-          onClick={() => {
-            onAddTag(newTag);
-            setNewTag("");
-          }}
-          style={{ marginLeft: 5 }}
-        >
-          Add Tag
-        </button>
-      </div>
-    </div>
+  const [resRef, setResRef] = useState(
+    operation.responses?.["200"]?.content?.["application/json"]?.schema?.$ref || ""
   );
-};
 
-/** -------------------------------------------------------------
- *  REQUEST/RESPONSE EDITOR
- *  -------------------------------------------------------------
- **/
-interface RequestResponseEditorProps {
-  operation: OperationObject;
-  apiDoc: OpenAPIDocument;
-  setApiDoc: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
-  pathName: string;
-  method: string;
-}
-const RequestResponseEditor: React.FC<RequestResponseEditorProps> = ({
-  operation,
-  apiDoc,
-  setApiDoc,
-  pathName,
-  method,
-}) => {
-  const [requestSchemaRef, setRequestSchemaRef] = useState("");
-  const [responseSchemaRef, setResponseSchemaRef] = useState("");
+  function commitReqResp() {
+    // Build updated operation
+    const updated: OperationObject = { ...operation };
 
-  const schemaNames = Object.keys(apiDoc.components?.schemas || {});
-
-  useEffect(() => {
-    const reqRef = operation.requestBody?.content?.["application/json"]?.schema?.$ref || "";
-    const resRef = operation.responses?.["200"]?.content?.["application/json"]?.schema?.$ref || "";
-    setRequestSchemaRef(reqRef);
-    setResponseSchemaRef(resRef);
-  }, [operation]);
-
-  const handleSave = () => {
-    const updatedPaths = { ...apiDoc.paths };
-    const op = { ...updatedPaths[pathName][method] };
-
-    // Request
-    if (!requestSchemaRef) {
-      delete op.requestBody;
+    // If reqRef is empty, remove requestBody
+    if (!reqRef.trim()) {
+      delete updated.requestBody;
     } else {
-      op.requestBody = {
+      updated.requestBody = {
         content: {
-          "application/json": {
-            schema: { $ref: requestSchemaRef },
-          },
+          "application/json": { schema: { $ref: reqRef.trim() } },
         },
       };
     }
 
-    // 200 Response
-    if (!responseSchemaRef) {
-      if (op.responses?.["200"]) {
-        op.responses["200"].content = undefined;
+    // If resRef is empty, remove 200's content
+    if (!resRef.trim()) {
+      if (updated.responses?.["200"]) {
+        updated.responses["200"] = {
+          description: updated.responses["200"].description || "OK",
+        };
       }
     } else {
-      const desc = op.responses["200"]?.description || "OK";
-      op.responses["200"] = {
-        description: desc,
-        content: {
-          "application/json": {
-            schema: { $ref: responseSchemaRef },
-          },
+      // Ensure we have a 200 object
+      const old200 = updated.responses?.["200"] || { description: "OK" };
+      updated.responses = {
+        ...updated.responses,
+        "200": {
+          ...old200,
+          content: { "application/json": { schema: { $ref: resRef.trim() } } },
         },
       };
     }
 
-    updatedPaths[pathName][method] = op;
-    setApiDoc((prev) => ({ ...prev, paths: updatedPaths }));
+    commitOperation(updated);
+  }
+
+
+  const handleAddTag = (tag: string) => {
+    if (!tag.trim()) return;
+    const updatedTags = [...tags, tag.trim()];
+    commitOperation({ tags: updatedTags });
   };
 
-  return (
-    <div style={{ minWidth: 300 }}>
-      <div>
-        <label htmlFor="reqSchemaSelect">Request Schema:</label>
-        <select
-          id="reqSchemaSelect"
-          style={{ marginLeft: 5, marginBottom: 8 }}
-          value={requestSchemaRef}
-          onChange={(e) => setRequestSchemaRef(e.target.value)}
-        >
-          <option value="">(None)</option>
-          {schemaNames.map((sn) => {
-            const fullRef = `#/components/schemas/${sn}`;
-            return (
-              <option key={sn} value={fullRef}>
-                {sn}
-              </option>
-            );
-          })}
-        </select>
-      </div>
-      <div>
-        <label htmlFor="resSchemaSelect">200 Response Schema:</label>
-        <select
-          id="resSchemaSelect"
-          style={{ marginLeft: 5 }}
-          value={responseSchemaRef}
-          onChange={(e) => setResponseSchemaRef(e.target.value)}
-        >
-          <option value="">(None)</option>
-          {schemaNames.map((sn) => {
-            const fullRef = `#/components/schemas/${sn}`;
-            return (
-              <option key={sn} value={fullRef}>
-                {sn}
-              </option>
-            );
-          })}
-        </select>
-      </div>
+  const handleDeleteTag = (tagToRemove: string) => {
+    const updatedTags = tags.filter((t) => t !== tagToRemove);
+    commitOperation({ tags: updatedTags });
+  };
 
-      <div style={{ marginTop: 10 }}>
-        <button onClick={handleSave} style={{ marginRight: 8 }}>
-          Save
+  // Request/Response editing is omitted here for brevity, but you can do inline selects, etc.
+
+  return (
+    <div style={{ marginTop: 5, padding: "5px 0", borderBottom: "1px solid #ddd" }}>
+      <div>
+        <strong>{method.toUpperCase()}</strong>
+        <button onClick={onDelete} style={{ marginLeft: 10 }}>
+          Delete
         </button>
       </div>
+      <div style={{ marginTop: 5 }}>
+        <label>Summary: </label>
+        <input
+          type="text"
+          value={summary}
+          onChange={(e) => setSummary(e.target.value)}
+          onBlur={() => commitOperation({ summary })}
+          style={{ width: 200 }}
+        />
+      </div>
+      <div style={{ marginTop: 5 }}>
+        <label>Description:</label>
+        <textarea
+          rows={2}
+          value={desc}
+          onChange={(e) => setDesc(e.target.value)}
+          onBlur={() => commitOperation({ description: desc })}
+          style={{ width: 300 }}
+        />
+      </div>
+
+      {/* Multi-expose */}
+      <div style={{ marginTop: 5 }}>
+        <label>Expose Channels:</label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+          {EXPOSE_OPTIONS.map((opt) => (
+            <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <input
+                type="checkbox"
+                value={opt}
+                checked={expose.includes(opt)}
+                onChange={(e) => {
+                  const newExpose = e.target.checked
+                    ? [...expose, opt]
+                    : expose.filter((item) => item !== opt);
+                  setExpose(newExpose);
+                  commitOperation({ "x-expose-to": expose.join(", ") });
+                }}
+              />
+              {opt}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Tags inline */}
+      <div style={{ marginTop: 5 }}>
+        <strong>Tags:</strong>{" "}
+        {tags.map((t) => (
+          <span key={t} style={{ marginRight: 5 }}>
+            {t}{" "}
+            <button onClick={() => handleDeleteTag(t)} style={{ marginLeft: 2 }}>
+              x
+            </button>
+          </span>
+        ))}
+        <AddTagInline onAddTag={handleAddTag} />
+      </div>
+      {/* Inline Request/Response Editor */}
+  <div style={{ marginTop: 10, padding: "6px 0", borderTop: "1px solid #ccc" }}>
+    <strong>Request/Response Schemas:</strong>
+    <div style={{ marginTop: 5 }}>
+      <label style={{ marginRight: 5 }}>Request Schema ($ref):</label>
+      <select
+        value={reqRef}
+        onChange={(e) => setReqRef(e.target.value)}
+        style={{ width: 280, marginRight: 5 }}
+      >
+        <option value="">(None)</option>
+        {Object.keys(editorState.components?.schemas || {}).map((name) => (
+          <option key={name} value={`#/components/schemas/${name}`}>{name}</option>
+        ))}
+      </select>
+    </div>
+    <div style={{ marginTop: 5 }}>
+      <label style={{ marginRight: 5 }}>200 Response Schema ($ref):</label>
+      <select
+        value={resRef}
+        onChange={(e) => setResRef(e.target.value)}
+        style={{ width: 280, marginRight: 5 }}
+      >
+        <option value="">(None)</option>
+        {Object.keys(editorState.components?.schemas || {}).map((name) => (
+          <option key={name} value={`#/components/schemas/${name}`}>{name}</option>
+        ))}
+      </select>
+    </div>
+    <div style={{ marginTop: 5 }}>
+      <button onClick={commitReqResp}>Save Req/Resp</button>
+    </div>
+  </div>
     </div>
   );
 };
 
-/** -------------------------------------------------------------
- *  SCHEMAS LIST
- *  -------------------------------------------------------------
- **/
-interface SchemasListProps {
-  apiDoc: OpenAPIDocument;
-  setApiDoc: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
+/** Simple inline tag-adder */
+const AddTagInline: React.FC<{ onAddTag: (tag: string) => void }> = ({ onAddTag }) => {
+  const [tagInput, setTagInput] = useState("");
+
+  return (
+    <>
+      <input
+        type="text"
+        value={tagInput}
+        onChange={(e) => setTagInput(e.target.value)}
+        style={{ marginLeft: 10 }}
+        placeholder="New tag..."
+      />
+      <button
+        onClick={() => {
+          onAddTag(tagInput);
+          setTagInput("");
+        }}
+        style={{ marginLeft: 5 }}
+      >
+        +
+      </button>
+    </>
+  );
+};
+
+/** ========================================================================
+ *  SCHEMAS EDITOR (Enforce 'No inline arrays of objects')
+ * ========================================================================
+ */
+interface SchemasEditorProps {
+  editorState: OpenAPIDocument;
+  setEditorState: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
   showMessage: (msg: string, type: "info" | "error") => void;
-  openConfirm: (data: ConfirmModalData) => void;
 }
 
-const SchemasList: React.FC<SchemasListProps> = ({ apiDoc, setApiDoc, showMessage, openConfirm }) => {
-  const [showAddSchema, setShowAddSchema] = useState(false);
+const SchemasEditor: React.FC<SchemasEditorProps> = ({ editorState, setEditorState, showMessage }) => {
   const [newSchemaName, setNewSchemaName] = useState("");
+  const schemas = editorState.components?.schemas || {};
 
-  const handleCreateSchema = () => {
-    const trimmedName = newSchemaName.trim();
-    if (!trimmedName) {
+  function handleAddSchema() {
+    const trimmed = newSchemaName.trim();
+    if (!trimmed) {
       showMessage("Schema name cannot be empty.", "error");
       return;
     }
-    const existing = apiDoc.components?.schemas || {};
-    if (existing[trimmedName]) {
-      showMessage(`Schema "${trimmedName}" already exists!`, "error");
+    if (schemas[trimmed]) {
+      showMessage(`Schema "${trimmed}" already exists!`, "error");
       return;
     }
-    existing[trimmedName] = { type: "object", properties: {} };
-    setApiDoc({
-      ...apiDoc,
-      components: { ...apiDoc.components, schemas: { ...existing } },
-    });
-    showMessage(`Schema "${trimmedName}" created.`, "info");
+    const newSchemas = { ...schemas, [trimmed]: { type: "object", properties: {} } };
+    setEditorState((prev) => ({
+      ...prev,
+      components: { ...prev.components, schemas: newSchemas },
+    }));
     setNewSchemaName("");
-    setShowAddSchema(false);
-  };
+    showMessage(`Schema "${trimmed}" created.`, "info");
+  }
 
-  const handleDeleteSchema = (schemaName: string) => {
-    openConfirm({
-      title: "Delete Schema?",
-      message: `Are you sure you want to delete schema "${schemaName}"?`,
-      onConfirm: () => {
-        const updated = { ...apiDoc.components?.schemas };
-        delete updated[schemaName];
-        setApiDoc({ ...apiDoc, components: { ...apiDoc.components, schemas: updated } });
-        showMessage(`Schema "${schemaName}" deleted.`, "info");
-      },
-    });
-  };
+  function handleDeleteSchema(schemaName: string) {
+    const updatedSchemas = { ...schemas };
+    delete updatedSchemas[schemaName];
+    setEditorState((prev) => ({
+      ...prev,
+      components: { ...prev.components, schemas: updatedSchemas },
+    }));
+    showMessage(`Schema "${schemaName}" deleted.`, "info");
+  }
 
-  const allSchemas = apiDoc.components?.schemas || {};
-
+  // Render each schema
   return (
     <fieldset style={{ border: "1px solid #aaa", padding: 10, marginBottom: 20 }}>
       <legend>
         <strong>Schemas</strong>
       </legend>
 
-      {Object.keys(allSchemas).length === 0 && <p>No schemas defined.</p>}
-
-      {Object.entries(allSchemas).map(([schemaName, schemaObj]) => (
+      {Object.entries(schemas).map(([schemaName, schemaObj]) => (
         <SchemaRow
           key={schemaName}
           schemaName={schemaName}
           schemaObj={schemaObj}
-          apiDoc={apiDoc}
-          setApiDoc={setApiDoc}
+          editorState={editorState}
+          setEditorState={setEditorState}
           onDeleteSchema={() => handleDeleteSchema(schemaName)}
         />
       ))}
 
-      {showAddSchema ? (
-        <div style={{ marginTop: 8 }}>
-          <label htmlFor="newSchemaInput" style={{ marginRight: 5 }}>
-            Schema Name:
-          </label>
-          <input
-            id="newSchemaInput"
-            type="text"
-            placeholder="MyNewSchema"
-            value={newSchemaName}
-            onChange={(e) => setNewSchemaName(e.target.value)}
-          />
-          <button onClick={handleCreateSchema} style={{ marginLeft: 5 }}>
-            Create
-          </button>
-          <button onClick={() => setShowAddSchema(false)} style={{ marginLeft: 5 }}>
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <button onClick={() => setShowAddSchema(true)} style={{ marginTop: 10 }}>
-          + Add Schema
-        </button>
-      )}
+      <div style={{ marginTop: 8 }}>
+        <input
+          type="text"
+          placeholder="NewSchemaName"
+          value={newSchemaName}
+          onChange={(e) => setNewSchemaName(e.target.value)}
+          style={{ marginRight: 5 }}
+        />
+        <button onClick={handleAddSchema}>Add Schema</button>
+      </div>
     </fieldset>
   );
 };
@@ -1045,315 +892,126 @@ const SchemasList: React.FC<SchemasListProps> = ({ apiDoc, setApiDoc, showMessag
 interface SchemaRowProps {
   schemaName: string;
   schemaObj: SchemaObject;
-  apiDoc: OpenAPIDocument;
-  setApiDoc: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
+  editorState: OpenAPIDocument;
+  setEditorState: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
   onDeleteSchema: () => void;
 }
 
-const SchemaRow: React.FC<SchemaRowProps> = ({ schemaName, schemaObj, apiDoc, setApiDoc, onDeleteSchema }) => {
-  const [editSchemaModal, setEditSchemaModal] = useState(false);
+/**
+ * If user chooses array + object items, we create a new named schema behind the scenes
+ * and store its $ref in .items.
+ */
+const SchemaRow: React.FC<SchemaRowProps> = ({
+  schemaName,
+  schemaObj,
+  editorState,
+  setEditorState,
+  onDeleteSchema,
+}) => {
+  const [typeChoice, setTypeChoice] = useState(schemaObj.$ref ? "$ref" : schemaObj.type || "object");
+  const [refValue, setRefValue] = useState(schemaObj.$ref || "");
 
-  const isObject = schemaObj.type === "object";
-  const isArray = schemaObj.type === "array";
-  const props = isObject && schemaObj.properties ? schemaObj.properties : {};
+  const initialExpose = schemaObj["x-expose-to"] ? schemaObj["x-expose-to"]!.split(",").map((s) => s.trim()) : [];
+  const [expose, setExpose] = useState<string[]>(initialExpose);
+
+  // If it's an object, show properties inline
+  const isObject = typeChoice === "object";
+  const isArray = typeChoice === "array";
+
+  // If user picks array + object, we auto-create a named schema
+  const [arrayItemType, setArrayItemType] = useState(schemaObj.items?.type || "");
+  const [arrayItemRef, setArrayItemRef] = useState(schemaObj.items?.$ref || "");
+
+  const properties = schemaObj.properties || {};
+
+  function commitSchema(newSchema: SchemaObject) {
+    const newSchemas = { ...(editorState.components?.schemas || {}) };
+    newSchemas[schemaName] = newSchema;
+    setEditorState((prev) => ({
+      ...prev,
+      components: {
+        ...prev.components,
+        schemas: newSchemas,
+      },
+    }));
+  }
+
+  function handleSaveClick() {
+    const updated: SchemaObject = {};
+
+    // If $ref, set $ref
+    if (typeChoice === "$ref") {
+      updated.$ref = refValue.trim();
+    } else if (typeChoice === "object") {
+      updated.type = "object";
+      updated.properties = properties; // keep existing properties
+    } else if (typeChoice === "array") {
+      updated.type = "array";
+      // If user picks 'object' for items, create a new named schema
+      if (arrayItemType === "object" && !arrayItemRef) {
+        // Make a new schema name, e.g.: MySchema_items
+        const newItemSchemaName = `${schemaName}_items`;
+        // If it doesn't exist, create it:
+        const schemaExists = editorState.components?.schemas?.[newItemSchemaName];
+        if (!schemaExists) {
+          const newSub = { type: "object", properties: {} };
+          const updatedSchemas = { ...(editorState.components?.schemas || {}) };
+          updatedSchemas[newItemSchemaName] = newSub;
+          setEditorState((prev) => ({
+            ...prev,
+            components: {
+              ...prev.components,
+              schemas: updatedSchemas,
+            },
+          }));
+        }
+        // Then reference it
+        updated.items = { $ref: `#/components/schemas/${newItemSchemaName}` };
+      } else if (arrayItemRef.trim()) {
+        // if user typed/picked an existing ref
+        updated.items = { $ref: arrayItemRef.trim() };
+      } else if (["string", "number", "boolean"].includes(arrayItemType)) {
+        updated.items = { type: arrayItemType };
+      } else {
+        // fallback
+        updated.items = { type: "string" };
+      }
+    } else {
+      // handle basic scalar: string, number, boolean
+      updated.type = typeChoice;
+    }
+
+    // Expose channels
+    if (expose.length > 0) {
+      updated["x-expose-to"] = expose.join(", ");
+    }
+
+    // Merge any pre-existing subproperties if we had them
+    if (schemaObj.properties && !updated.properties) {
+      updated.properties = schemaObj.properties;
+    }
+
+    commitSchema(updated);
+  }
 
   return (
-    <div style={{ padding: 5, borderBottom: "1px solid #ddd" }}>
-      <div>
-        <strong>{schemaName}</strong>{" "}
-        <small>(type: {schemaObj.type || (schemaObj.$ref ? "$ref" : "??")})</small>
-        <button style={{ marginLeft: 5 }} onClick={() => setEditSchemaModal(true)}>
-          Edit
-        </button>
-        <button style={{ marginLeft: 5 }} onClick={onDeleteSchema}>
+    <div style={{ borderBottom: "1px solid #ddd", padding: 5 }}>
+      <div style={{ marginBottom: 5 }}>
+        <strong>{schemaName}</strong>
+        <button onClick={onDeleteSchema} style={{ marginLeft: 10 }}>
           Delete
         </button>
       </div>
 
-      {isObject && (
-        <SchemaPropertiesList
-          schemaName={schemaName}
-          properties={props}
-          apiDoc={apiDoc}
-          setApiDoc={setApiDoc}
-        />
-      )}
-      {isArray && schemaObj.items && (
-        <div style={{ marginLeft: 20, marginTop: 5 }}>
-          <strong>Array Items:</strong>{" "}
-          {schemaObj.items.$ref
-            ? `($ref) ${schemaObj.items.$ref}`
-            : `(type=${schemaObj.items.type || "object"})`}
-        </div>
-      )}
-
-      {editSchemaModal && (
-        <Modal title={`Edit Schema: ${schemaName}`} onClose={() => setEditSchemaModal(false)}>
-          <SchemaTypeEditor
-            schemaObj={schemaObj}
-            onSave={(updated) => {
-              const newSchemas = { ...apiDoc.components!.schemas! };
-              newSchemas[schemaName] = updated;
-              setApiDoc({ ...apiDoc, components: { ...apiDoc.components, schemas: newSchemas } });
-              setEditSchemaModal(false);
-            }}
-          />
-        </Modal>
-      )}
-    </div>
-  );
-};
-
-/** -------------------------------------------------------------
- *  SCHEMA PROPERTIES LIST
- *  -------------------------------------------------------------
- **/
-interface SchemaPropertiesListProps {
-  schemaName: string;
-  properties: Record<string, SchemaObject>;
-  apiDoc: OpenAPIDocument;
-  setApiDoc: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
-}
-
-const SchemaPropertiesList: React.FC<SchemaPropertiesListProps> = ({
-  schemaName,
-  properties,
-  apiDoc,
-  setApiDoc,
-}) => {
-  const [showAddProp, setShowAddProp] = useState(false);
-  const [newPropName, setNewPropName] = useState("");
-
-  const handleAddProperty = () => {
-    const trimmed = newPropName.trim();
-    if (!trimmed) return;
-    const schemaObj = apiDoc.components!.schemas![schemaName];
-    const currProps = schemaObj.properties || {};
-    if (currProps[trimmed]) {
-      alert("Property already exists!");
-      return;
-    }
-    currProps[trimmed] = { type: "string" };
-    const newSchemaObj = { ...schemaObj, properties: { ...currProps } };
-    setApiDoc({
-      ...apiDoc,
-      components: {
-        ...apiDoc.components,
-        schemas: { ...apiDoc.components!.schemas!, [schemaName]: newSchemaObj },
-      },
-    });
-    setNewPropName("");
-    setShowAddProp(false);
-  };
-
-  const handleDeleteProperty = (propName: string) => {
-    const schemaObj = apiDoc.components!.schemas![schemaName];
-    const newProps = { ...schemaObj.properties };
-    delete newProps[propName];
-    schemaObj.properties = newProps;
-    setApiDoc({
-      ...apiDoc,
-      components: {
-        ...apiDoc.components,
-        schemas: { ...apiDoc.components!.schemas!, [schemaName]: schemaObj },
-      },
-    });
-  };
-
-  return (
-    <div style={{ marginLeft: 20, marginTop: 5 }}>
-      <strong>Properties:</strong>
-      {Object.keys(properties).length === 0 && <p>(no properties)</p>}
-
-      {Object.entries(properties).map(([propName, propSchema]) => (
-        <PropertyRow
-          key={propName}
-          propName={propName}
-          propSchema={propSchema}
-          schemaName={schemaName}
-          apiDoc={apiDoc}
-          setApiDoc={setApiDoc}
-          onDelete={() => handleDeleteProperty(propName)}
-        />
-      ))}
-
-      {showAddProp ? (
-        <div style={{ marginTop: 8 }}>
-          <label htmlFor="newPropInput" style={{ marginRight: 5 }}>
-            New Property:
-          </label>
-          <input
-            id="newPropInput"
-            type="text"
-            placeholder="newProperty"
-            value={newPropName}
-            onChange={(e) => setNewPropName(e.target.value)}
-          />
-          <button onClick={handleAddProperty} style={{ marginLeft: 5 }}>
-            Add
-          </button>
-          <button onClick={() => setShowAddProp(false)} style={{ marginLeft: 5 }}>
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <button onClick={() => setShowAddProp(true)} style={{ marginTop: 5 }}>
-          + Add Property
-        </button>
-      )}
-    </div>
-  );
-};
-
-/** -------------------------------------------------------------
- *  PROPERTY ROW 
- *  -------------------------------------------------------------
- **/
-interface PropertyRowProps {
-  propName: string;
-  propSchema: SchemaObject;
-  schemaName: string;
-  apiDoc: OpenAPIDocument;
-  setApiDoc: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
-  onDelete: () => void;
-}
-
-const PropertyRow: React.FC<PropertyRowProps> = ({
-  propName,
-  propSchema,
-  schemaName,
-  apiDoc,
-  setApiDoc,
-  onDelete,
-}) => {
-  const [editPropModal, setEditPropModal] = useState(false);
-
-  const handlePropSave = (updated: SchemaObject) => {
-    const schemaObj = apiDoc.components!.schemas![schemaName];
-    const newProps = { ...schemaObj.properties, [propName]: updated };
-    schemaObj.properties = newProps;
-    setApiDoc({
-      ...apiDoc,
-      components: {
-        ...apiDoc.components,
-        schemas: { ...apiDoc.components!.schemas!, [schemaName]: schemaObj },
-      },
-    });
-  };
-
-  let propLabel = "";
-  if (propSchema.$ref) propLabel = `$ref: ${propSchema.$ref}`;
-  else if (propSchema.type) propLabel = propSchema.type;
-  else propLabel = "(unknown)";
-
-  return (
-    <div>
-      - <strong>{propName}</strong> <small>({propLabel})</small>
-      <button style={{ marginLeft: 5 }} onClick={() => setEditPropModal(true)}>
-        Edit
-      </button>
-      <button style={{ marginLeft: 5 }} onClick={onDelete}>
-        Delete
-      </button>
-
-      {editPropModal && (
-        <Modal title={`Edit Property: ${propName}`} onClose={() => setEditPropModal(false)}>
-          <SchemaTypeEditor
-            schemaObj={propSchema}
-            onSave={(updated) => {
-              handlePropSave(updated);
-              setEditPropModal(false);
-            }}
-          />
-        </Modal>
-      )}
-    </div>
-  );
-};
-
-/** -------------------------------------------------------------
- *  SCHEMA TYPE EDITOR
- *  -------------------------------------------------------------
- **/
-interface SchemaTypeEditorProps {
-  schemaObj: SchemaObject;
-  onSave: (updated: SchemaObject) => void;
-}
-const SchemaTypeEditor: React.FC<SchemaTypeEditorProps> = ({ schemaObj, onSave }) => {
-  const [typeChoice, setTypeChoice] = useState(schemaObj.$ref ? "$ref" : schemaObj.type || "object");
-  const [refValue, setRefValue] = useState(schemaObj.$ref || "");
-  const [itemType, setItemType] = useState(schemaObj.items?.type || "");
-  const [itemRef, setItemRef] = useState(schemaObj.items?.$ref || "");
-
-  // Convert the comma-separated xExpose to an array for the multi-select
-  const initialExpose = schemaObj['x-expose-to'] ? schemaObj['x-expose-to'].split(",").map((s) => s.trim()) : [];
-  const [exposeArray, setExposeArray] = useState<string[]>(initialExpose);
-
-  useEffect(() => {
-    if (typeChoice !== "$ref") {
-      setRefValue("");
-    }
-    if (typeChoice !== "array") {
-      setItemType("");
-      setItemRef("");
-    }
-  }, [typeChoice]);
-
-  const handleSaveClick = () => {
-    let newSchema: SchemaObject = {};
-
-    // handle types
-    if (typeChoice === "$ref") {
-      newSchema.$ref = refValue.trim();
-    } else if (typeChoice === "object") {
-      newSchema.type = "object";
-      newSchema.properties = schemaObj.properties || {};
-    } else if (typeChoice === "array") {
-      newSchema.type = "array";
-      if (itemRef.trim()) {
-        newSchema.items = { $ref: itemRef.trim() };
-      } else if (itemType) {
-        if (itemType === "object") {
-          newSchema.items = { type: "object", properties: {} };
-        } else {
-          newSchema.items = { type: itemType };
-        }
-      } else {
-        newSchema.items = { type: "string" };
-      }
-    } else if (["string", "number", "boolean"].includes(typeChoice)) {
-      newSchema.type = typeChoice;
-    } else {
-      // fallback
-      newSchema.type = "object";
-      newSchema.properties = {};
-    }
-
-    // handle xExpose
-    if (exposeArray.length > 0) {
-      newSchema['x-expose-to'] = exposeArray.join(", ");
-    } else {
-      delete newSchema['x-expose-to'];
-    }
-
-    onSave(newSchema);
-  };
-
-  // multi-select event handler
-  const handleExposeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedValues = Array.from(e.target.selectedOptions).map((option) => option.value);
-    setExposeArray(selectedValues);
-  };
-
-  return (
-    <div style={{ minWidth: 300 }}>
-      {/* Type */}
-      <div style={{ marginBottom: 8 }}>
-        <label htmlFor="schemaTypeSelect">Schema Type:</label>{" "}
+      {/* Type / $ref selection */}
+      <div style={{ marginBottom: 5 }}>
+        <label>Type:</label>{" "}
         <select
-          id="schemaTypeSelect"
           value={typeChoice}
-          onChange={(e) => setTypeChoice(e.target.value)}
+          onChange={(e) => {
+            setTypeChoice(e.target.value);
+            setRefValue("");
+          }}
         >
           <option value="object">object</option>
           <option value="array">array</option>
@@ -1362,63 +1020,66 @@ const SchemaTypeEditor: React.FC<SchemaTypeEditorProps> = ({ schemaObj, onSave }
           <option value="boolean">boolean</option>
           <option value="$ref">$ref</option>
         </select>
+
+        {typeChoice === "$ref" && (
+          <div style={{ marginTop: 5 }}>
+            <label>$ref:</label>{" "}
+            <input
+              type="text"
+              value={refValue}
+              onChange={(e) => setRefValue(e.target.value)}
+              placeholder="#/components/schemas/AnotherSchema"
+              style={{ width: 300, marginLeft: 5 }}
+            />
+          </div>
+        )}
+
+        {typeChoice === "array" && (
+          <div style={{ marginTop: 5 }}>
+            <label>Array Items Type:</label>{" "}
+            <select
+              value={arrayItemType}
+              onChange={(e) => {
+                setArrayItemType(e.target.value);
+                setArrayItemRef("");
+              }}
+            >
+              <option value="">(select)</option>
+              <option value="object">object (new named schema)</option>
+              <option value="string">string</option>
+              <option value="number">number</option>
+              <option value="boolean">boolean</option>
+              <option value="$ref">Existing $ref</option>
+            </select>
+
+            {arrayItemType === "$ref" && (
+              <div style={{ marginTop: 5 }}>
+                <label>Item $ref:</label>{" "}
+                <input
+                  type="text"
+                  value={arrayItemRef}
+                  onChange={(e) => setArrayItemRef(e.target.value)}
+                  placeholder="#/components/schemas/SomeExisting"
+                  style={{ width: 300, marginLeft: 5 }}
+                />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {typeChoice === "$ref" && (
-        <div style={{ marginBottom: 8 }}>
-          <label htmlFor="refInput">Reference: </label>{" "}
-          <input
-            id="refInput"
-            type="text"
-            value={refValue}
-            onChange={(e) => setRefValue(e.target.value)}
-            placeholder="#/components/schemas/AnotherSchema"
-            style={{ width: "100%" }}
-          />
-        </div>
-      )}
-
-      {typeChoice === "array" && (
-        <div style={{ marginBottom: 8 }}>
-          <label htmlFor="itemTypeSelect">Array Items: </label>{" "}
-          <select
-            id="itemTypeSelect"
-            value={itemType}
-            onChange={(e) => {
-              setItemType(e.target.value);
-              setItemRef("");
-            }}
-          >
-            <option value="">(select)</option>
-            <option value="object">object</option>
-            <option value="string">string</option>
-            <option value="number">number</option>
-            <option value="boolean">boolean</option>
-            <option value="$ref">$ref</option>
-          </select>
-          {itemType === "$ref" && (
-            <div style={{ marginTop: 5 }}>
-              <input
-                type="text"
-                placeholder="#/components/schemas/SomeItemSchema"
-                value={itemRef}
-                onChange={(e) => setItemRef(e.target.value)}
-                style={{ width: "100%" }}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Expose multi-select */}
-      <div style={{ marginBottom: 8 }}>
-        <label htmlFor="schemaExposeSelect">Expose Channels:</label>
+      {/* Expose channels multi-select */}
+      <div style={{ marginBottom: 5 }}>
+        <label>Expose Channels:</label>
+        <br />
         <select
-          id="schemaExposeSelect"
           multiple
-          value={exposeArray}
-          onChange={handleExposeChange}
-          style={{ width: "100%", minHeight: "5em" }}
+          value={expose}
+          onChange={(e) => {
+            const selectedVals = Array.from(e.target.selectedOptions).map((o) => o.value);
+            setExpose(selectedVals);
+          }}
+          style={{ width: 200, minHeight: 60 }}
         >
           {EXPOSE_OPTIONS.map((opt) => (
             <option key={opt} value={opt}>
@@ -1428,156 +1089,203 @@ const SchemaTypeEditor: React.FC<SchemaTypeEditorProps> = ({ schemaObj, onSave }
         </select>
       </div>
 
-      <div style={{ marginTop: 10 }}>
-        <button onClick={handleSaveClick} style={{ marginRight: 8 }}>
-          Save
-        </button>
-      </div>
+      <button onClick={handleSaveClick} style={{ marginBottom: 8 }}>
+        Save Type
+      </button>
+
+      {/* If it's an object, show the properties inline */}
+      {isObject && (
+        <PropertiesEditor schemaName={schemaName} schemaObj={schemaObj} editorState={editorState} setEditorState={setEditorState} />
+      )}
     </div>
   );
 };
 
-/** -------------------------------------------------------------
- *  MULTI-SELECT EXPOSE (for endpoints)
- *  -------------------------------------------------------------
- **/
-interface MultiSelectExposeProps {
-  currentValue: string;
-  onSave: (val: string) => void;
-}
-const MultiSelectExpose: React.FC<MultiSelectExposeProps> = ({ currentValue, onSave }) => {
-  const initialChannels = currentValue ? currentValue.split(",").map((s) => s.trim()) : [];
-  const [selected, setSelected] = useState<string[]>(initialChannels);
-
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const vals = Array.from(e.target.selectedOptions).map((o) => o.value);
-    setSelected(vals);
-  };
-
-  const handleSaveClick = () => {
-    onSave(selected.join(", "));
-  };
-
-  return (
-    <div style={{ minWidth: 300 }}>
-      <label htmlFor="multiExposeSelect">Expose Channels:</label>
-      <select
-        id="multiExposeSelect"
-        multiple
-        value={selected}
-        onChange={handleChange}
-        style={{ width: "100%", minHeight: "5em", marginTop: 5 }}
-      >
-        {EXPOSE_OPTIONS.map((opt) => (
-          <option key={opt} value={opt}>
-            {opt}
-          </option>
-        ))}
-      </select>
-
-      <div style={{ marginTop: 10 }}>
-        <button onClick={handleSaveClick}>Save</button>
-      </div>
-    </div>
-  );
-};
-
-/** -------------------------------------------------------------
- *  GENERIC SECTION EDITOR
- *  -------------------------------------------------------------
- **/
-interface GenericFieldConfig {
-  key: string; // property key in the data object
-  label: string;
-  type: "text" | "textarea";
+/**
+ * PROPERTIES EDITOR
+ * For object-type schemas. Uses inline forms, no modals.
+ */
+interface PropertiesEditorProps {
+  schemaName: string;
+  schemaObj: SchemaObject;
+  editorState: OpenAPIDocument;
+  setEditorState: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
 }
 
-interface GenericSectionEditorProps {
-  title?: string;
-  data: any;
-  fields: GenericFieldConfig[];
-  onSave: (updatedData: any) => void;
-}
-
-const GenericSectionEditor: React.FC<GenericSectionEditorProps> = ({
-  title,
-  data,
-  fields,
-  onSave,
+const PropertiesEditor: React.FC<PropertiesEditorProps> = ({
+  schemaName,
+  schemaObj,
+  editorState,
+  setEditorState,
 }) => {
-  const [localData, setLocalData] = useState<any>(data || {});
+  const properties = schemaObj.properties || {};
+  const [newPropName, setNewPropName] = useState("");
 
-  const handleChange = (key: string, value: string) => {
-    setLocalData({ ...localData, [key]: value });
-  };
+  function commitProperties(newProps: Record<string, SchemaObject>) {
+    const newSchema = { ...schemaObj, properties: newProps };
+    const schemas = { ...(editorState.components?.schemas || {}) };
+    schemas[schemaName] = newSchema;
+    setEditorState((prev) => ({
+      ...prev,
+      components: { ...prev.components, schemas },
+    }));
+  }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSave(localData);
-  };
+  function handleAddProperty() {
+    const trimmed = newPropName.trim();
+    if (!trimmed) return;
+    if (properties[trimmed]) {
+      alert(`Property "${trimmed}" already exists!`);
+      return;
+    }
+    commitProperties({
+      ...properties,
+      [trimmed]: { type: "string" },
+    });
+    setNewPropName("");
+  }
+
+  function handleDeleteProperty(prop: string) {
+    const updated = { ...properties };
+    delete updated[prop];
+    commitProperties(updated);
+  }
 
   return (
-    <form onSubmit={handleSubmit} style={{ maxWidth: 400 }}>
-      {title && <h3>{title}</h3>}
-      {fields.map((field) => {
-        const val = localData[field.key] || "";
-        return (
-          <div key={field.key} style={{ marginBottom: 10 }}>
-            <label htmlFor={`generic-${field.key}`} style={{ display: "block", marginBottom: 4 }}>
-              {field.label}:
-            </label>
-            {field.type === "textarea" ? (
-              <textarea
-                id={`generic-${field.key}`}
-                value={val}
-                onChange={(e) => handleChange(field.key, e.target.value)}
-                rows={3}
-                style={{ width: "100%" }}
-              />
-            ) : (
-              <input
-                id={`generic-${field.key}`}
-                type="text"
-                value={val}
-                onChange={(e) => handleChange(field.key, e.target.value)}
-                style={{ width: "100%" }}
-              />
-            )}
-          </div>
-        );
-      })}
-
-      <div style={{ marginTop: 10 }}>
-        <button type="submit" style={{ marginRight: 10 }}>
-          Save
-        </button>
+    <div style={{ marginLeft: 20, marginTop: 5 }}>
+      <strong>Properties</strong>
+      <div style={{ marginTop: 5 }}>
+        {Object.entries(properties).map(([propName, propSchema]) => (
+          <PropertyRow
+            key={propName}
+            schemaName={schemaName}
+            propName={propName}
+            propSchema={propSchema}
+            editorState={editorState}
+            setEditorState={setEditorState}
+            onDelete={() => handleDeleteProperty(propName)}
+          />
+        ))}
       </div>
-    </form>
+
+      {/* Inline property add */}
+      <div style={{ marginTop: 8 }}>
+        <input
+          type="text"
+          placeholder="NewProperty"
+          value={newPropName}
+          onChange={(e) => setNewPropName(e.target.value)}
+          style={{ marginRight: 5 }}
+        />
+        <button onClick={handleAddProperty}>Add Property</button>
+      </div>
+    </div>
   );
 };
 
-/** -------------------------------------------------------------
- *  BASIC MODAL WRAPPER
- *  -------------------------------------------------------------
- **/
-interface ModalProps {
-  title: string;
-  children: React.ReactNode;
-  onClose: () => void;
+interface PropertyRowProps {
+  schemaName: string;
+  propName: string;
+  propSchema: SchemaObject;
+  editorState: OpenAPIDocument;
+  setEditorState: React.Dispatch<React.SetStateAction<OpenAPIDocument>>;
+  onDelete: () => void;
 }
-const Modal: React.FC<ModalProps> = ({ title, children, onClose }) => {
+
+const PropertyRow: React.FC<PropertyRowProps> = ({
+  schemaName,
+  propName,
+  propSchema,
+  editorState,
+  setEditorState,
+  onDelete,
+}) => {
+  const [typeChoice, setTypeChoice] = useState(propSchema.$ref ? "$ref" : propSchema.type || "string");
+  const [refValue, setRefValue] = useState(propSchema.$ref || "");
+  const initialExpose = propSchema["x-expose-to"] ? propSchema["x-expose-to"]!.split(",").map((s) => s.trim()) : [];
+  const [expose, setExpose] = useState<string[]>(initialExpose);
+
+  function commitProp(newSchema: SchemaObject) {
+    const currentSchema = editorState.components?.schemas?.[schemaName];
+    if (!currentSchema) return;
+
+    const newProps = { ...(currentSchema.properties || {}) };
+    newProps[propName] = newSchema;
+
+    const newSchemaObj = { ...currentSchema, properties: newProps };
+    const newSchemas = { ...(editorState.components?.schemas || {}) };
+    newSchemas[schemaName] = newSchemaObj;
+
+    setEditorState((prev) => ({
+      ...prev,
+      components: { ...prev.components, schemas: newSchemas },
+    }));
+  }
+
+  function handleSaveProp() {
+    const updated: SchemaObject = {};
+    if (typeChoice === "$ref") {
+      updated.$ref = refValue.trim();
+    } else {
+      updated.type = typeChoice;
+    }
+    if (expose.length > 0) {
+      updated["x-expose-to"] = expose.join(", ");
+    }
+    commitProp(updated);
+  }
+
   return (
-    <div style={overlayStyle}>
-      <div style={modalStyle} aria-modal="true" role="dialog" aria-labelledby="modalTitle">
-        <div style={{ marginBottom: 10 }}>
-          <h3 id="modalTitle" style={{ margin: 0 }}>
-            {title}
-          </h3>
-        </div>
-        <div>{children}</div>
-        <div style={{ marginTop: 10 }}>
-          <button onClick={onClose}>Close</button>
-        </div>
+    <div style={{ marginTop: 3, padding: "2px 0" }}>
+      - <strong>{propName}</strong>
+      <button onClick={onDelete} style={{ marginLeft: 5 }}>
+        Delete
+      </button>
+      <div style={{ marginLeft: 10, marginTop: 2 }}>
+        <label>Type:</label>{" "}
+        <select
+          value={typeChoice}
+          onChange={(e) => {
+            setTypeChoice(e.target.value);
+            setRefValue("");
+          }}
+        >
+          <option value="string">string</option>
+          <option value="number">number</option>
+          <option value="boolean">boolean</option>
+          <option value="object">object</option>
+          <option value="array">array</option>
+          <option value="$ref">$ref</option>
+        </select>
+        {typeChoice === "$ref" && (
+          <input
+            type="text"
+            value={refValue}
+            onChange={(e) => setRefValue(e.target.value)}
+            placeholder="#/components/schemas/Another"
+            style={{ marginLeft: 5 }}
+          />
+        )}
+        <br />
+        <label>Expose:</label>{" "}
+        <select
+          multiple
+          value={expose}
+          onChange={(e) => {
+            const vals = Array.from(e.target.selectedOptions).map((o) => o.value);
+            setExpose(vals);
+          }}
+          style={{ marginLeft: 5, minHeight: 40 }}
+        >
+          {EXPOSE_OPTIONS.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+        <button onClick={handleSaveProp} style={{ marginLeft: 8 }}>
+          Save
+        </button>
       </div>
     </div>
   );
